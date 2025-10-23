@@ -1,0 +1,33 @@
+npm init -y
+npm install express jsonwebtoken jwks-rsa dotenv cors
+
+**PARA INICIAR EL BACKEND**
+cd backend
+npm start
+npm install express mysql2 body-parser
+npm install dotenv
+
+
+**PARA INICIAR EL FRONTEND**
+npm run dev
+npm install oidc-client-ts react-router-dom
+npm install --save-dev @types/react-router-dom
+
+
+
+**BASE DE DATOS**
+CREATE DATABASE IF NOT EXISTS pagosdb;
+USE pagosdb;
+
+CREATE TABLE pagos (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  carne VARCHAR(20) NOT NULL,
+  concepto ENUM('inscription', 'colegiatura', 'laboratorio', 'examen_final') NOT NULL,
+  monto_Q DECIMAL(10,2) NOT NULL,
+  email VARCHAR(255),
+  status ENUM('pendiente', 'completado', 'cancelado') NOT NULL DEFAULT 'pendiente'
+);
+
+
+Google analytics
+
