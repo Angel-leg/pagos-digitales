@@ -1,0 +1,25 @@
+# 1. Scripts de bash (Linux/Docker)
+*.sh text eol=lf
+
+# 2. Dockerfiles
+Dockerfile text eol=lf
+
+# 3. Archivos de configuración YAML (docker-compose, etc.)
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# 4. Archivos de texto plano / código fuente
+*.py text=auto
+*.js text=auto
+*.ts text=auto
+*.json text=auto
+*.html text=auto
+*.css text=auto
+
+# 5. Archivos binarios (no tocar)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
