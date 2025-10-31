@@ -1,6 +1,18 @@
 import React, { useState, useEffect } from "react";
 import "../assets/styles/PaymentForm.css";
 
+const loadPayPalSdk = (clientId) => {
+  return new Promise((resolve, reject) => {
+    if (window.paypal) return resolve(window.paypal);
+    const script = document.createElement("script");
+    script.src = `https://www.paypal.com/sdk/js?client-id=${clientId}&currency=USD`;
+    script.async = true;
+    script.onload = () => resolve(window.paypal);
+    script.onerror = (e) => reject(new Error("PayPal SDK failed to load"));
+    document.body.appendChild(script);
+  });
+};
+
 const PaymentForm = () => {
   const [formData, setFormData] = useState({
     student_id: "",
@@ -11,11 +23,16 @@ const PaymentForm = () => {
 
   const [errors, setErrors] = useState({});
   const [showPaypal, setShowPaypal] = useState(false);
+  const [paypalReady, setPaypalReady] = useState(false);
+
+  const usePayPal = import.meta.env.VITE_USE_PAYPAL === "true";
+  const paypalClientId = import.meta.env.VITE_PAYPAL_CLIENT_ID;
+  const apiBase = import.meta.env.VITE_API_BASE || "http://localhost:3000";
 
   const concepts = [
     { value: "inscription", label: "Inscripción" },
     { value: "colegiatura", label: "Colegiatura" },
-    { value: "pago de curso", label: "pago de curso" },
+    { value: "pago_de_curso", label: "pago de curso" },
     { value: "examen_final", label: "Examen Final" },
   ];
 
@@ -39,7 +56,6 @@ const PaymentForm = () => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-
     if (name === "concept") {
       setFormData({
         ...formData,
@@ -54,77 +70,151 @@ const PaymentForm = () => {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!validate()) return;
-    setShowPaypal(true); // Solo mostramos PayPal, sin guardar aún
+
+    if (usePayPal) {
+      setShowPaypal(true);
+    } else {
+      // Modo mock: directamente mostrar la UI de confirmación de pago mock
+      setShowPaypal(true);
+      setPaypalReady(true); // para que renderice el mock
+    }
   };
 
   useEffect(() => {
-    if (showPaypal && window.paypal) {
-      window.paypal.Buttons({
-        createOrder: (data, actions) => {
-          return actions.order.create({
-            purchase_units: [
-              {
-                amount: { value: formData.amount_usd },
-                description: formData.concept,
-              },
-            ],
-          });
-        },
-        onApprove: async (data, actions) => {
-          const details = await actions.order.capture();
-          alert(`Pago completado en PayPal. ID transacción: ${details.id}`);
+    let mounted = true;
 
-          try {
-            const token = localStorage.getItem("access_token");
-//Reemplazar localhost por la ip publica de aws
-            const response = await fetch("http://localhost:3000/api/pagos", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({
-                carne: formData.student_id,
-                concepto: formData.concept,
-                monto_Q: formData.amount_usd,
-                email: formData.email,
-                paypal_transaction_id: details.id,
-              }),
+    const initPaypal = async () => {
+      if (!showPaypal) return;
+      if (!usePayPal) return;
+
+      try {
+        // Cargamos SDK dinámicamente solo si VITE_USE_PAYPAL=true
+        await loadPayPalSdk(paypalClientId);
+        if (!mounted) return;
+        setPaypalReady(true);
+
+        // Renderizamos botones solo si la SDK ya está disponible
+        window.paypal.Buttons({
+          createOrder: (data, actions) => {
+            return actions.order.create({
+              purchase_units: [
+                {
+                  amount: { value: formData.amount_usd },
+                  description: formData.concept,
+                },
+              ],
             });
+          },
+          onApprove: async (data, actions) => {
+            const details = await actions.order.capture();
+            alert(`Pago completado en PayPal. ID transacción: ${details.id}`);
 
-            const data = await response.json();
-
-            if (response.ok) {
-              alert(`Pago registrado en la base de datos. ID: ${data.id}`);
-            } else {
-              alert("Pago completado, pero hubo un error al registrar: " + data.error);
+            // Guardar en backend
+            try {
+              const token = localStorage.getItem("access_token");
+              const response = await fetch(`${apiBase}/api/pagos`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                  carne: formData.student_id,
+                  concepto: formData.concept,
+                  monto_Q: formData.amount_usd,
+                  email: formData.email,
+                  paypal_transaction_id: details.id,
+                }),
+              });
+              const data = await response.json();
+              if (response.ok) {
+                alert(`Pago registrado en la base de datos. ID: ${data.id}`);
+              } else {
+                alert("Pago completado, pero hubo un error al registrar: " + data.error);
+              }
+            } catch (error) {
+              console.error("Error al guardar pago:", error);
+              alert("Ocurrió un error al guardar el pago.");
             }
-          } catch (error) {
-            console.error("Error al guardar pago:", error);
-            alert("Ocurrió un error al guardar el pago.");
-          }
 
-          // Limpiar el formulario y ocultar PayPal
-          setFormData({
-            student_id: "",
-            concept: "inscription",
-            amount_usd: "",
-            email: "",
-          });
-          setShowPaypal(false);
+            // limpiar
+            setFormData({
+              student_id: "",
+              concept: "inscription",
+              amount_usd: "",
+              email: "",
+            });
+            setShowPaypal(false);
+            setPaypalReady(false);
+          },
+          onCancel: () => {
+            alert("Pago cancelado");
+            setShowPaypal(false);
+            setPaypalReady(false);
+          },
+          onError: (err) => {
+            console.error(err);
+            alert("Error en el proceso de pago");
+            setShowPaypal(false);
+            setPaypalReady(false);
+          },
+        }).render("#paypal-button-container");
+      } catch (err) {
+        console.error("No se pudo cargar PayPal SDK:", err);
+        alert("No se pudo inicializar PayPal. Revisa la configuración.");
+        setShowPaypal(false);
+        setPaypalReady(false);
+      }
+    };
+
+    initPaypal();
+
+    return () => {
+      mounted = false;
+    };
+  }, [showPaypal, formData, usePayPal, paypalClientId, apiBase]);
+
+  // Función para simular pago (modo mock)
+  const simulatePayment = async () => {
+    const fakeId = `MOCK_PAYPAL_${Date.now()}`;
+    alert(`(Mock) Pago completado. ID transacción: ${fakeId}`);
+
+    try {
+      const token = localStorage.getItem("access_token");
+      const response = await fetch(`${apiBase}/api/pagos`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
-        onCancel: () => {
-          alert("Pago cancelado");
-          setShowPaypal(false); 
-        },
-        onError: (err) => {
-          console.error(err);
-          alert("Error en el proceso de pago");
-          setShowPaypal(false); // 
-        },
-      }).render("#paypal-button-container");
+        body: JSON.stringify({
+          carne: formData.student_id,
+          concepto: formData.concept,
+          monto_Q: formData.amount_usd,
+          email: formData.email,
+          paypal_transaction_id: fakeId,
+        }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        alert(`Pago registrado en la base de datos. ID: ${data.id}`);
+      } else {
+        alert("Pago completado, pero hubo un error al registrar: " + (data.error || "unknown"));
+      }
+    } catch (error) {
+      console.error("Error al guardar pago (mock):", error);
+      alert("Ocurrió un error al guardar el pago.");
     }
-  }, [showPaypal, formData]);
+
+    setFormData({
+      student_id: "",
+      concept: "inscription",
+      amount_usd: "",
+      email: "",
+    });
+    setShowPaypal(false);
+    setPaypalReady(false);
+  };
 
   return (
     <div className="payment-page-container">
@@ -187,10 +277,17 @@ const PaymentForm = () => {
             </button>
           </form>
 
-          {/* PayPal + Cancelar */}
           {showPaypal && (
             <div className="paypal-container">
               <div id="paypal-button-container"></div>
+
+              {!usePayPal && paypalReady && (
+                <>
+                  <p>Modo prueba (PayPal deshabilitado). Usa el botón mock para simular el pago.</p>
+                  <button onClick={simulatePayment}>Simular Pago</button>
+                </>
+              )}
+
               <button
                 className="cancel-button"
                 onClick={() => {
